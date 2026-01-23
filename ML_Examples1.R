@@ -7,6 +7,15 @@ library(tm)
 library(SnowballC)
 library(naivebayes)
 library(wordcloud)
+library(C50)
+library(rpart)
+library(Cubist)
+library(rpart.plot)
+library(neuralnet)
+library(kernlab)
+
+#Set seed to ensure reproducibility
+set.seed(135)
 
 #KNN Example: Chapter 3
 ## Step 2: Exploring and preparing the data ---- 
@@ -244,4 +253,310 @@ sms_test_pred2 <- predict(sms_classifier2, sms_test)
 CrossTable(sms_test_pred2, sms_test_labels,
            prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
            dnn = c('predicted', 'actual'))
+ 
+## Example: Identifying Risky Bank Loans ----
+## Step 2: Exploring and preparing the data ----
+credit <- read.csv("C:/Data/credit.csv", stringsAsFactors = TRUE)
+str(credit)
 
+# look at two characteristics of the applicant
+table(credit$checking_balance)
+table(credit$savings_balance)
+
+# look at two characteristics of the loan
+summary(credit$months_loan_duration)
+summary(credit$amount)
+
+# look at the class variable
+table(credit$default)
+
+# create a random sample for training and test data
+# use set.seed to use the same random number sequence as the tutorial
+train_sample <- sample(1000, 900)
+str(train_sample)
+
+# split the data frames
+credit_train <- credit[train_sample, ]
+credit_test  <- credit[-train_sample, ]
+
+# check the proportion of class variable
+prop.table(table(credit_train$default))
+prop.table(table(credit_test$default))
+
+## Step 3: Training a model on the data ----
+# build the simplest decision tree
+credit_model <- C5.0(default ~ ., data = credit_train)
+
+# display simple facts about the tree
+credit_model
+
+# display detailed information about the tree
+summary(credit_model)
+
+## Step 4: Evaluating model performance ----
+# create a factor vector of predictions on test data
+credit_pred <- predict(credit_model, credit_test)
+
+# cross tabulation of predicted versus actual classes
+CrossTable(credit_test$default, credit_pred,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual default', 'predicted default'))
+
+## Step 5: Improving model performance ----
+
+## Boosting the accuracy of decision trees
+# boosted decision tree with 10 trials
+credit_boost10 <- C5.0(default ~ ., data = credit_train,
+                       trials = 10)
+credit_boost10
+summary(credit_boost10)
+
+credit_boost_pred10 <- predict(credit_boost10, credit_test)
+CrossTable(credit_test$default, credit_boost_pred10,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('actual default', 'predicted default')) 
+
+## Example: Estimating Wine Quality ----
+## Step 2: Exploring and preparing the data ----
+wine <- read.csv("C:/Data/whitewines.csv")
+
+# examine the wine data
+str(wine)
+
+# the distribution of quality ratings
+hist(wine$quality)
+
+# summary statistics of the wine data
+summary(wine)
+
+wine_train <- wine[1:3750, ]
+wine_test <- wine[3751:4898, ]
+
+## Step 3: Training a model on the data ----
+# regression tree using rpart
+m.rpart <- rpart(quality ~ ., data = wine_train)
+
+# get basic information about the tree
+m.rpart
+
+# get more detailed information about the tree
+summary(m.rpart)
+
+# a basic decision tree diagram
+rpart.plot(m.rpart, digits = 3)
+
+# a few adjustments to the diagram
+rpart.plot(m.rpart, digits = 4, fallen.leaves = TRUE, type = 3, extra = 101)
+
+## Step 4: Evaluate model performance ----
+
+# generate predictions for the testing dataset
+p.rpart <- predict(m.rpart, wine_test)
+
+# compare the distribution of predicted values vs. actual values
+summary(p.rpart)
+summary(wine_test$quality)
+
+# compare the correlation
+cor(p.rpart, wine_test$quality)
+
+# function to calculate the mean absolute error
+MAE <- function(actual, predicted) {
+  mean(abs(actual - predicted))  
+}
+
+# mean absolute error between predicted and actual values
+MAE(p.rpart, wine_test$quality)
+
+# mean absolute error between actual values and mean value
+mean(wine_train$quality) # result = 5.87
+MAE(5.87, wine_test$quality)
+
+## Step 5: Improving model performance ----
+# train a Cubist Model Tree
+m.cubist <- cubist(x = wine_train[-12], y = wine_train$quality)
+
+# display basic information about the model tree
+m.cubist
+
+# display the tree itself
+summary(m.cubist)
+
+# generate predictions for the model
+p.cubist <- predict(m.cubist, wine_test)
+
+# summary statistics about the predictions
+summary(p.cubist)
+
+# correlation between the predicted and true values
+cor(p.cubist, wine_test$quality)
+
+# mean absolute error of predicted and true values
+# (uses a custom function defined above)
+MAE(wine_test$quality, p.cubist)
+
+##### Chapter 7: Neural Networks and Support Vector Machines -------------------
+
+##### Part 1: Neural Networks -------------------
+## Example: Modeling the Strength of Concrete  ----
+
+## Step 2: Exploring and preparing the data ----
+# read in data and examine structure
+concrete <- read.csv("C:/Data/concrete.csv")
+str(concrete)
+
+# custom normalization function
+normalize <- function(x) { 
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# apply normalization to entire data frame
+concrete_norm <- as.data.frame(lapply(concrete, normalize))
+
+# confirm that the range is now between zero and one
+summary(concrete_norm$strength)
+
+# compared to the original minimum and maximum
+summary(concrete$strength)
+
+# create training and test data
+concrete_train <- concrete_norm[1:773, ]
+concrete_test <- concrete_norm[774:1030, ]
+
+## Step 3: Training a model on the data ----
+# train the neuralnet model
+
+# simple ANN with only a single hidden neuron
+concrete_model <- neuralnet(strength ~ cement + slag +
+                              ash + water + superplastic + 
+                              coarseagg + fineagg + age,
+                            data = concrete_train)
+
+# visualize the network topology
+plot(concrete_model)
+
+## Step 4: Evaluating model performance ----
+# obtain model results
+model_results <- compute(concrete_model, concrete_test[1:8])
+# obtain predicted strength values
+predicted_strength <- model_results$net.result
+# examine the correlation between predicted and actual values
+cor(predicted_strength, concrete_test$strength)
+
+## Step 5: Improving model performance ----
+# a more complex neural network topology with 5 hidden neurons
+set.seed(135) # to guarantee repeatable results
+concrete_model2 <- neuralnet(strength ~ cement + slag +
+                               ash + water + superplastic + 
+                               coarseagg + fineagg + age,
+                             data = concrete_train, hidden = 5)
+
+# plot the network
+plot(concrete_model2)
+
+# evaluate the results as we did before
+model_results2 <- compute(concrete_model2, concrete_test[1:8])
+predicted_strength2 <- model_results2$net.result
+cor(predicted_strength2, concrete_test$strength)
+
+# an EVEN MORE complex neural network topology with two hidden layers and custom activation function
+
+# create a custom softplus activation function
+softplus <- function(x) { log(1 + exp(x)) }
+
+concrete_model3 <- neuralnet(strength ~ cement + slag +
+                               ash + water + superplastic + 
+                               coarseagg + fineagg + age,
+                             data = concrete_train, hidden = c(5, 5), act.fct = softplus)
+
+# plot the network
+plot(concrete_model3)
+
+# evaluate the results as we did before
+model_results3 <- compute(concrete_model3, concrete_test[1:8])
+predicted_strength3 <- model_results3$net.result
+cor(predicted_strength3, concrete_test$strength)
+
+# note that the predicted and actual values are on different scales
+strengths <- data.frame(
+  actual = concrete$strength[774:1030],
+  pred = predicted_strength3
+)
+
+head(strengths, n = 3)
+
+# correlation is unaffected by normalization...
+# ...but measures like percent error would be affected by the change in scale!
+cor(strengths$pred, strengths$actual)
+cor(strengths$pred, concrete_test$strength)
+
+# create an unnormalize function to reverse the normalization
+unnormalize <- function(x) { 
+  return(x * (max(concrete$strength) -
+                min(concrete$strength)) + min(concrete$strength))
+}
+
+strengths$pred_new <- unnormalize(strengths$pred)
+strengths$error_pct <- (strengths$pred_new - strengths$actual) / strengths$actual
+head(strengths, n = 3)
+
+# correlation stays the same despite reversing the normalization
+cor(strengths$pred_new, strengths$actual)
+
+##### Part 2: Support Vector Machines -------------------
+## Example: Optical Character Recognition ----
+
+## Step 2: Exploring and preparing the data ----
+# read in data and examine structure
+letters <- read.csv("C:/Data/letterdata.csv", stringsAsFactors = TRUE)
+str(letters)
+
+# divide into training and test data
+letters_train <- letters[1:16000, ]
+letters_test  <- letters[16001:20000, ]
+
+## Step 3: Training a model on the data ----
+# begin by training a simple linear SVM
+letter_classifier <- ksvm(letter ~ ., data = letters_train,
+                          kernel = "vanilladot")
+
+# look at basic information about the model
+letter_classifier
+
+## Step 4: Evaluating model performance ----
+# predictions on testing dataset
+letter_predictions <- predict(letter_classifier, letters_test)
+
+head(letter_predictions)
+
+table(letter_predictions, letters_test$letter)
+
+# look only at agreement vs. non-agreement
+# construct a vector of TRUE/FALSE indicating correct/incorrect predictions
+agreement <- letter_predictions == letters_test$letter
+table(agreement)
+prop.table(table(agreement))
+
+## Step 5: Improving model performance ----
+
+# change to a RBF kernel
+letter_classifier_rbf <- ksvm(letter ~ ., data = letters_train, kernel = "rbfdot")
+letter_predictions_rbf <- predict(letter_classifier_rbf, letters_test)
+
+agreement_rbf <- letter_predictions_rbf == letters_test$letter
+table(agreement_rbf)
+prop.table(table(agreement_rbf))
+
+# test various values of the cost parameter
+cost_values <- c(1, seq(from = 5, to = 40, by = 5))
+
+accuracy_values <- sapply(cost_values, function(x) {
+  m <- ksvm(letter ~ ., data = letters_train,
+            kernel = "rbfdot", C = x)
+  pred <- predict(m, letters_test)
+  agree <- ifelse(pred == letters_test$letter, 1, 0)
+  accuracy <- sum(agree) / nrow(letters_test)
+  return (accuracy)
+})
+
+plot(cost_values, accuracy_values, type = "b")  
