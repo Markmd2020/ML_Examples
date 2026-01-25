@@ -13,6 +13,11 @@ library(Cubist)
 library(rpart.plot)
 library(neuralnet)
 library(kernlab)
+library(caret)
+library(irr)
+library(vcd)
+library(tidyverse)
+library(gbm)
 
 #Set seed to ensure reproducibility
 set.seed(135)
@@ -559,4 +564,114 @@ accuracy_values <- sapply(cost_values, function(x) {
   return (accuracy)
 })
 
-plot(cost_values, accuracy_values, type = "b")  
+plot(cost_values, accuracy_values, type = "b")
+
+## Automating 10-fold CV for a C5.0 Decision Tree using lapply() ----
+credit <- read.csv("C:/Data/credit.csv", stringsAsFactors = TRUE)
+
+folds <- createFolds(credit$default, k = 10)
+
+cv_results <- lapply(folds, function(x) {
+  credit_train <- credit[-x, ]
+  credit_test <- credit[x, ]
+  credit_model <- C5.0(default ~ ., data = credit_train)
+  credit_pred <- predict(credit_model, credit_test)
+  credit_actual <- credit_test$default
+  kappa <- kappa2(data.frame(credit_actual, credit_pred))$value
+  return(kappa)
+})
+
+# examine the results of the 10 trials
+str(cv_results)
+
+# compute the average kappa across the 10 trials
+mean(unlist(cv_results))
+
+# compute the standard deviation across the 10 trials
+sd(unlist(cv_results)) 
+
+#Categorical Data Feature Encoding  Example
+titanic_train <- read_csv("C:/Data/titanic_train.csv") |>
+  mutate(Title = str_extract(Name, ", [A-z]+\\.")) |>
+  mutate(Title = str_replace_all(Title, "[, \\.]", ""))
+
+# the Title feature has a large number of categories
+table(titanic_train$Title, useNA = "ifany")
+
+# group categories with similar real-world meaning
+titanic_train <- titanic_train |>
+  mutate(TitleGroup = fct_collapse(Title, 
+                                   Mr = "Mr",
+                                   Mrs = "Mrs",
+                                   Master = "Master",
+                                   Miss = c("Miss", "Mlle", "Mme", "Ms"),
+                                   Noble = c("Don", "Sir", "Jonkheer", "Lady"),
+                                   Military = c("Capt", "Col", "Major"),
+                                   Doctor = "Dr",
+                                   Clergy = "Rev",
+                                   other_level = "Other")
+  ) |>
+  mutate(TitleGroup = fct_na_value_to_level(TitleGroup,
+                                            level = "Unknown"))
+
+# examine the recoding
+table(titanic_train$TitleGroup)
+
+# look at the counts and proportions of all levels, sorted largest to smallest
+fct_count(titanic_train$Title, sort = TRUE, prop = TRUE)
+
+# lump together everything outside of the top three levels
+table(fct_lump_n(titanic_train$Title, n = 3))
+
+# lump together everything with less than 1%
+table(fct_lump_prop(titanic_train$Title, prop = 0.01))
+
+# lump together everything with fewer than 5 observations
+table(fct_lump_min(titanic_train$Title, min = 5))
+
+#Hyper parameter tuning
+
+# load the credit dataset
+credit <- read.csv("C:/Data/credit.csv")
+
+## Customizing the tuning process ----
+# use trainControl() to alter resampling strategy
+ctrl <- trainControl(method = "cv", number = 10,
+                     selectionFunction = "oneSE")
+
+# use expand.grid() to create grid of tuning parameters
+grid <- expand.grid(model = "tree",
+                    trials = c(1, 5, 10, 15, 20, 25, 30, 35),
+                    winnow = FALSE)
+
+# look at the result of expand.grid()
+grid
+
+# customize train() with the control list and grid of parameters 
+m <- train(default ~ ., data = credit, method = "C5.0",
+           metric = "Kappa",
+           trControl = ctrl,
+           tuneGrid = grid)
+
+# see the results
+m
+
+# create a tuned gbm() model using caret
+# start by creating the tuning grid
+grid_gbm <- expand.grid(
+  n.trees = c(100, 150, 200),
+  interaction.depth = c(1, 2, 3),
+  shrinkage = c(0.01, 0.1, 0.3),
+  n.minobsinnode = 10
+)
+
+ctrl <- trainControl(method = "cv", number = 10,
+                     selectionFunction = "best")
+
+m_gbm_c <- train(default ~ ., data = credit, method = "gbm",
+                 trControl = ctrl, tuneGrid = grid_gbm,
+                 metric = "Kappa",
+                 verbose = FALSE)
+
+# see the results
+m_gbm_c
