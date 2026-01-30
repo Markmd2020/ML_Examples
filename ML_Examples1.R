@@ -18,6 +18,8 @@ library(irr)
 library(vcd)
 library(tidyverse)
 library(gbm)
+library(word2vec)
+library(Rtsne)
 
 #Set seed to ensure reproducibility
 set.seed(135)
@@ -675,3 +677,53 @@ m_gbm_c <- train(default ~ ., data = credit, method = "gbm",
 
 # see the results
 m_gbm_c
+
+#Vector Embeddings
+# load the Google-trained 300-dimension word2vec embedding
+m_w2v <- read.word2vec(file = "GoogleNews-vectors-negative300.bin",
+                       normalize = TRUE)
+
+# examine the structure of the model
+str(m_w2v)
+
+# obtain the vector for a few terms
+foods <- predict(m_w2v, c("cereal", "bacon", "eggs", "sandwich", "salad", "steak", "spaghetti"), type = "embedding")
+meals <- predict(m_w2v, c("breakfast", "lunch", "dinner"), type = "embedding")
+
+# examine a single word vector
+head(foods["cereal", ])
+
+# examine the first few columns
+foods[, 1:5]
+
+# compute the similarity between the foods and meals
+word2vec_similarity(foods, meals)
+
+# can also use cosine similarity (not shown in book)
+word2vec_similarity(foods, meals, type = "cosine")
+
+#Dimensionality Reduction using t-SNE
+sns_sample <- read_csv("C:/Data/snsdata.csv") |>
+  slice_sample(n = 1000)
+
+sns_tsne <- sns_sample |>
+  select(basketball:drugs) |>
+  Rtsne(check_duplicates = FALSE)
+
+# visualize the t-SNE result
+data.frame(sns_tsne$Y) |>
+  ggplot(aes(X1, X2)) + geom_point(size = 2, shape = 1) 
+
+# create a categorical feature for the number of terms used
+sns_sample_tsne <- sns_sample |>
+  bind_cols(data.frame(sns_tsne$Y)) |> # add the t-SNE data
+  rowwise() |> # work across rows rather than columns
+  mutate(n_terms = sum(c_across(basketball:drugs))) |>
+  ungroup() |> # remove rowwise behavior
+  mutate(`Terms Used` = if_else(n_terms > 0, "1+", "0"))
+
+# visualize the t-SNE result by number of terms used
+sns_sample_tsne |>
+  ggplot(aes(X1, X2, shape = `Terms Used`, color = `Terms Used`)) +
+  geom_point(size = 2) +
+  scale_shape(solid = FALSE)
